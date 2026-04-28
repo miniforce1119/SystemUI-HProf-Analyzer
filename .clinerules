@@ -1,0 +1,31 @@
+# Cline Rules — SystemUI HProf Analyzer 사내 포팅
+
+## 역할
+이 프로젝트는 2번 테스트 시스템(hprof 포함) 데이터를 분석하는 도구입니다.
+실제 사내 데이터로 테스트하고 파서를 조정하는 것이 주 작업입니다.
+
+## 수정 가능 파일
+
+### 조건부 수정 (실제 데이터와 맞지 않을 때만)
+- systemui_hprof_analyzer/parser/meminfo_parser.py → 파싱 에러 시 패턴 조정
+- systemui_hprof_analyzer/parser/hprof_parser.py → hprof 포맷 차이 시 조정
+- systemui_hprof_analyzer/extractor/scanner.py → 파일명 패턴이 다를 때 정규식 수정
+- systemui_hprof_analyzer/analyzer/scenario_analyzer.py → 분석 로직 보강
+- systemui_hprof_analyzer/report/generator.py → 보고서 항목 추가/수정
+
+## 절대 수정 금지
+- systemui_hprof_analyzer/__init__.py
+- systemui_hprof_analyzer/__main__.py
+- .clinerules
+
+## 작업 순서
+1. 사내 테스트 데이터 zip을 해제하여 폴더 준비
+2. python -m systemui_hprof_analyzer scan ./test_data → 시나리오 목록 확인
+3. python -m systemui_hprof_analyzer analyze ./test_data --scenario idle → 분석 실행
+4. 파싱 에러가 있으면 해당 파서만 최소한으로 수정
+5. hprof 파싱이 너무 느리면 최적화 검토
+
+## 코딩 규칙
+- 기존 코드 스타일 유지 (dataclass, type hints)
+- 새 파일 생성하지 말 것
+- hprof는 125MB이므로 메모리 효율적 파싱 유지 (스트리밍 방식)

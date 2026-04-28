@@ -1,0 +1,5 @@
+# Core - 외부 의존성 없음 (stdlib만 사용)
+# hprof 파서, meminfo 파서, 보고서 생성 모두 순수 Python
+
+# Testing
+pytest>=7.0.0
