@@ -2,14 +2,17 @@
 SystemUI HProf Analyzer CLI
 
 사용법:
+  # [1단계] 두 버전 비교 — regression이 어느 시나리오에서 발생했는지 확인
+  python -m systemui_hprof_analyzer compare ./versionA ./versionB -o report.md
+
+  # [1단계] meminfo만 빠르게 비교 (hprof 심층 분석 건너뛰기)
+  python -m systemui_hprof_analyzer compare ./versionA ./versionB --no-deep
+
+  # [2단계] 한 버전 내부 분석 — 특정 시나리오의 leak 원인 특정
+  python -m systemui_hprof_analyzer analyze ./versionB --scenario idle -o report.md
+
   # 테스트 아카이브 스캔 (시나리오 목록 확인)
   python -m systemui_hprof_analyzer scan ./test_data
-
-  # 특정 시나리오 분석 (meminfo 20회 + hprof diff)
-  python -m systemui_hprof_analyzer analyze ./test_data --scenario idle
-
-  # 전체 시나리오 분석
-  python -m systemui_hprof_analyzer analyze ./test_data --all
 
   # hprof만 빠르게 비교
   python -m systemui_hprof_analyzer hprof-diff before.hprof after.hprof
@@ -29,7 +32,7 @@ if sys.stderr and hasattr(sys.stderr, "reconfigure"):
 
 from .extractor import scan_test_archive
 from .parser import MeminfoParser, HprofParser
-from .analyzer import ScenarioAnalyzer
+from .analyzer import ScenarioAnalyzer, VersionComparator
 from .report import ReportGenerator
 
 
@@ -119,6 +122,42 @@ def cmd_analyze(args):
         print()
 
 
+def cmd_compare(args):
+    """두 버전 비교 분석"""
+    print(f"=== 버전 비교 분석 ===")
+    print(f"Baseline: {args.baseline}")
+    print(f"Target:   {args.target}")
+    print()
+
+    baseline = scan_test_archive(args.baseline)
+    target = scan_test_archive(args.target)
+
+    if not baseline.scenarios:
+        print(f"오류: baseline '{args.baseline}'에서 시나리오를 찾을 수 없습니다.")
+        return
+    if not target.scenarios:
+        print(f"오류: target '{args.target}'에서 시나리오를 찾을 수 없습니다.")
+        return
+
+    comparator = VersionComparator()
+    result = comparator.compare(baseline, target, deep_analysis=not args.no_deep)
+
+    # 보고서 생성
+    report_gen = ReportGenerator()
+    report = report_gen.generate_comparison_report(result)
+
+    if args.output:
+        filepath = report_gen.save_report(report, filename=args.output)
+        print(f"\n보고서 저장: {filepath}")
+    else:
+        print()
+        print(report)
+
+    if args.json:
+        print("\n=== JSON Summary ===")
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+
+
 def cmd_hprof_diff(args):
     """hprof before/after 비교"""
     parser = HprofParser()
@@ -169,6 +208,17 @@ def main():
     scan_parser = subparsers.add_parser("scan", help="테스트 아카이브 스캔")
     scan_parser.add_argument("path", help="아카이브 zip 또는 해제된 폴더")
 
+    # compare (두 버전 비교)
+    compare_parser = subparsers.add_parser("compare", help="두 버전 비교 분석")
+    compare_parser.add_argument("baseline", help="기준 버전 zip 또는 폴더")
+    compare_parser.add_argument("target", help="비교 대상 버전 zip 또는 폴더")
+    compare_parser.add_argument("-o", "--output", help="보고서 출력 파일명")
+    compare_parser.add_argument("--json", action="store_true", help="JSON도 출력")
+    compare_parser.add_argument(
+        "--no-deep", action="store_true",
+        help="regression 감지 시 hprof 심층 분석 건너뛰기 (meminfo 비교만)"
+    )
+
     # analyze
     analyze_parser = subparsers.add_parser("analyze", help="시나리오 분석")
     analyze_parser.add_argument("path", help="아카이브 zip 또는 해제된 폴더")
@@ -191,6 +241,8 @@ def main():
 
     if args.command == "scan":
         cmd_scan(args)
+    elif args.command == "compare":
+        cmd_compare(args)
     elif args.command == "analyze":
         cmd_analyze(args)
     elif args.command == "hprof-diff":

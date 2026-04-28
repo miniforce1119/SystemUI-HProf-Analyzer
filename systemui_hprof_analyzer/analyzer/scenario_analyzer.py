@@ -66,20 +66,18 @@ class ScenarioAnalyzer:
         self.meminfo_parser = MeminfoParser()
         self.hprof_parser = HprofParser()
 
-    def analyze(self, scenario: ScenarioData) -> ScenarioResult:
-        """시나리오 데이터를 분석"""
+    def analyze_meminfo_only(self, scenario: ScenarioData) -> ScenarioResult:
+        """meminfo만 분석 (hprof 건너뜀, 버전 비교 1단계용)"""
         result = ScenarioResult(scenario_name=scenario.name)
+        self._parse_meminfo_rounds(result, scenario)
+        if result.meminfo_results:
+            result.meminfo_average = self._average_meminfo(result.meminfo_results)
+        return result
 
-        # 1. meminfo 파싱 (20회)
-        for round_num in sorted(scenario.rounds.keys()):
-            rd = scenario.rounds[round_num]
-            if rd.meminfo_path and rd.meminfo_path.exists():
-                try:
-                    mr = self.meminfo_parser.parse_file(str(rd.meminfo_path))
-                    result.meminfo_results.append(mr)
-                    result.meminfo_trend.append(mr.total_pss_kb)
-                except Exception as e:
-                    print(f"  경고: meminfo 파싱 실패 (회차 {round_num}): {e}")
+    def analyze(self, scenario: ScenarioData) -> ScenarioResult:
+        """시나리오 전체 분석 (meminfo + hprof)"""
+        result = ScenarioResult(scenario_name=scenario.name)
+        self._parse_meminfo_rounds(result, scenario)
 
         # 2. meminfo 평균 계산
         if result.meminfo_results:
@@ -97,6 +95,18 @@ class ScenarioAnalyzer:
                 print(f"  경고: hprof 분석 실패: {e}")
 
         return result
+
+    def _parse_meminfo_rounds(self, result: ScenarioResult, scenario: ScenarioData):
+        """시나리오의 meminfo 파일들을 파싱하여 result에 채움"""
+        for round_num in sorted(scenario.rounds.keys()):
+            rd = scenario.rounds[round_num]
+            if rd.meminfo_path and rd.meminfo_path.exists():
+                try:
+                    mr = self.meminfo_parser.parse_file(str(rd.meminfo_path))
+                    result.meminfo_results.append(mr)
+                    result.meminfo_trend.append(mr.total_pss_kb)
+                except Exception as e:
+                    print(f"  경고: meminfo 파싱 실패 (회차 {round_num}): {e}")
 
     def _average_meminfo(self, results: list) -> MeminfoResult:
         """여러 MeminfoResult의 평균 계산"""
