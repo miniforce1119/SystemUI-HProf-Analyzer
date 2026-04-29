@@ -4,14 +4,55 @@
 이 프로젝트는 2번 테스트 시스템(hprof 포함) 데이터를 분석하는 도구입니다.
 실제 사내 데이터로 테스트하고 파서를 조정하는 것이 주 작업입니다.
 
+## 사내 환경
+- hprof-conv 경로: C:/tools/platform-tools-latest-windows/platform-tools/hprof-conv.exe
+- MAT 설치됨 (ParseHeapDump CLI 사용 가능)
+- Java 설치됨 (OpenJDK Temurin)
+
+## 분석 파이프라인 (전체 흐름)
+
+### 자동화 대상
+```
+1. meminfo 20회 추이 분석 → 누수 여부 판단 (이상치 감지, trimmed 평균)
+2. 누수 감지 시 → hprof-conv로 Android hprof를 표준 Java hprof로 변환
+3. Python hprof 파서 → before vs after 인스턴스 diff → TOP 15 증가 객체 추출
+4. TOP 15에 대해 MAT CLI → 참조 체인(Path to GC Roots) 추적
+5. 결과를 통합 보고서에 삽입
+```
+
+### 보고서 최종 형태
+```
+인스턴스 증가 TOP 15 테이블 (Python hprof 파서)
+  +
+각 TOP 15 객체의 참조 체인 (MAT CLI)
+  → 개발자가 보고서만 보면 어떤 코드를 수정해야 하는지 바로 알 수 있음
+```
+
+### hprof-conv 변환 (필수)
+- Android hprof → 표준 Java hprof 변환 필수 (MAT가 Android 포맷 직접 못 읽음)
+- 명령: `hprof-conv input.hprof output.hprof`
+- 경로: C:/tools/platform-tools-latest-windows/platform-tools/hprof-conv.exe
+- 모든 hprof 파일에 대해 자동 실행해야 함
+
+### MAT CLI 연동
+- MAT CLI(ParseHeapDump)로 Leak Suspects 리포트 자동 생성
+- TOP 15 증가 객체에 대해 참조 체인 추출
+- 결과를 Python에서 파싱하여 보고서에 삽입
+- 필터링 하지 말 것: framework 클래스(Bitmap, TextView 등)도 참조 체인을 추적하면 SystemUI 코드가 나옴
+
 ## 수정 가능 파일
+
+### 새로 만들어야 할 것
+- systemui_hprof_analyzer/utils/hprof_converter.py → hprof-conv 자동 호출
+- systemui_hprof_analyzer/utils/mat_cli.py → MAT CLI 호출 + 결과 파싱
 
 ### 조건부 수정 (실제 데이터와 맞지 않을 때만)
 - systemui_hprof_analyzer/parser/meminfo_parser.py → 파싱 에러 시 패턴 조정
 - systemui_hprof_analyzer/parser/hprof_parser.py → hprof 포맷 차이 시 조정
 - systemui_hprof_analyzer/extractor/scanner.py → 파일명 패턴이 다를 때 정규식 수정
 - systemui_hprof_analyzer/analyzer/scenario_analyzer.py → 분석 로직 보강
-- systemui_hprof_analyzer/report/generator.py → 보고서 항목 추가/수정
+- systemui_hprof_analyzer/report/generator.py → 보고서에 참조 체인 섹션 추가
+- systemui_hprof_analyzer/cli.py → MAT CLI 연동 옵션 추가
 
 ## 절대 수정 금지
 - systemui_hprof_analyzer/__init__.py
@@ -23,9 +64,13 @@
 2. python -m systemui_hprof_analyzer scan ./test_data → 시나리오 목록 확인
 3. python -m systemui_hprof_analyzer analyze ./test_data --scenario idle → 분석 실행
 4. 파싱 에러가 있으면 해당 파서만 최소한으로 수정
-5. hprof 파싱이 너무 느리면 최적화 검토
+5. hprof-conv 자동 변환 구현 (utils/hprof_converter.py)
+6. MAT CLI 연동 구현 (utils/mat_cli.py)
+7. 보고서에 참조 체인 섹션 추가
+8. 전체 파이프라인 E2E 테스트
 
 ## 코딩 규칙
 - 기존 코드 스타일 유지 (dataclass, type hints)
-- 새 파일 생성하지 말 것
 - hprof는 125MB이므로 메모리 효율적 파싱 유지 (스트리밍 방식)
+- MAT CLI 호출 시 timeout 설정 (hprof 크기에 따라 1-5분 소요)
+- hprof-conv 변환된 파일은 임시 디렉토리에 생성하고 분석 후 정리

@@ -190,3 +190,75 @@ hprof before vs after
 | 그 외 | ✅ Normal |
 
 임계값은 `analyzer/version_comparator.py`의 `THRESHOLDS`에서 조정 가능합니다.
+
+---
+
+## MAT CLI 연동 (참조 체인 분석)
+
+### 사내 환경
+```
+hprof-conv: C:/tools/platform-tools-latest-windows/platform-tools/hprof-conv.exe
+MAT: 사내 PC에 설치됨 (ParseHeapDump CLI)
+Java: OpenJDK Temurin 설치됨
+```
+
+### hprof 변환이 필요한 이유
+Android에서 뜬 hprof는 Android 전용 포맷이므로 MAT가 직접 읽지 못합니다.
+`hprof-conv`로 표준 Java hprof로 변환해야 합니다.
+
+### 전체 파이프라인 (MAT 포함)
+
+```
+zip 해제
+  ↓
+[1] meminfo 20회 추이 → 누수 감지 (이상치 제거, trimmed 평균)
+  ↓ 누수 있으면
+[2] hprof-conv 실행 → Android hprof를 표준 Java hprof로 변환
+  ↓
+[3] Python hprof 파서 → before vs after diff → 인스턴스 증가 TOP 15
+  ↓
+[4] MAT CLI → TOP 15 각각에 대해 참조 체인(Path to GC Roots) 추적
+  ↓
+[5] 보고서 생성
+
+최종 보고서:
+  ├── 인스턴스 증가 TOP 15 테이블
+  └── 각 객체의 참조 체인
+       → 개발자가 어떤 코드를 수정해야 하는지 바로 보임
+```
+
+### 보고서 예시 (MAT 참조 체인 포함)
+
+```markdown
+## 인스턴스 증가 TOP 15
+
+| # | 클래스 | Before | After | 증가량 |
+|---|--------|--------|-------|--------|
+| 1 | TextView | 420 | 614 | +194 |
+| 2 | ImageView | 280 | 396 | +116 |
+| 3 | Bitmap | 340 | 412 | +72 |
+| 4 | QSTileView | 64 | 128 | +64 |
+
+## 참조 체인 분석
+
+### #1. TextView (+194)
+GC Root → QSPanel → mTileLayout → QSTileView → mLabel → TextView
+→ QSTileView 내부 라벨이 해제되지 않음
+
+### #2. ImageView (+116)
+GC Root → QSPanel → mTileLayout → QSTileView → mIconView → ImageView
+→ QSTileView 내부 아이콘이 해제되지 않음
+
+### #3. Bitmap (+72)
+GC Root → QSPanel → mTileLayout → QSTileView → mIconView → mDrawable → Bitmap
+→ 타일 아이콘 Bitmap이 GC되지 않음
+
+### #4. QSTileView (+64)
+GC Root → QSPanel → mTileLayout → mTiles (ArrayList) → QSTileView
+→ QSPanel.mTileLayout.mTiles에서 이전 타일 미제거가 root cause
+```
+
+### 중요: framework 클래스도 필터링하지 말 것
+Bitmap, TextView, ImageView 등 framework 클래스도 참조 체인을 추적하면
+결국 SystemUI 코드(QSPanel, QSTileView 등)로 연결됩니다.
+필터링하면 실제 메모리를 많이 차지하는 객체를 놓칠 수 있습니다.
