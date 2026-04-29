@@ -248,26 +248,59 @@ class ReportGenerator:
 
     def _section_pss_trend(self, result: ScenarioResult) -> list:
         trend = result.meminfo_trend
-        first = trend[0]
-        last = trend[-1]
-        diff = last - first
-        pct = (diff / first * 100) if first > 0 else 0
+        stats = result.trend_stats
 
         lines = [
-            "## 2. PSS 추이 (20회 반복)",
-            "",
-            f"| 항목 | 값 |",
-            f"|------|-----|",
-            f"| 1회차 PSS | {first:,} KB |",
-            f"| 20회차 PSS | {last:,} KB |",
-            f"| 변화량 | {diff:+,} KB ({pct:+.1f}%) |",
+            "## 2. PSS 추이 및 통계 (20회 반복)",
             "",
         ]
+
+        # 통계 테이블
+        if stats:
+            lines += [
+                "### 통계 요약",
+                "",
+                "| 항목 | 값 |",
+                "|------|-----|",
+                f"| 단순 평균 | {stats.raw_mean:,} KB |",
+                f"| **Trimmed 평균** (상하 10% 제거) | **{stats.trimmed_mean:,} KB** |",
+                f"| 중앙값 | {stats.median:,} KB |",
+                f"| 표준편차 | {stats.std_dev:,.1f} KB |",
+                f"| 최소 | {stats.min_value:,} KB |",
+                f"| 최대 | {stats.max_value:,} KB |",
+                f"| 1회차 → {stats.count}회차 | {stats.first_round:,} → {stats.last_round:,} KB |",
+                f"| 변화량 (이상치 제거) | {stats.growth_kb:+,} KB ({stats.growth_percent:+.1f}%) |",
+                "",
+            ]
+
+            # 이상치 정보
+            if stats.outliers:
+                lines += [
+                    f"### 이상치 감지 ({len(stats.outliers)}건, 평균 ± {2}σ 기준)",
+                    "",
+                    "| 회차 | PSS (KB) | 편차 (σ) | 비고 |",
+                    "|------|----------|----------|------|",
+                ]
+                for o in stats.outliers:
+                    direction = "↑ 높음" if o.pss_value > stats.raw_mean else "↓ 낮음"
+                    lines.append(
+                        f"| {o.round_index} | {o.pss_value:,} | {o.deviation:.1f}σ | {direction} |"
+                    )
+                lines += [
+                    "",
+                    f"> 이상치 {len(stats.outliers)}건은 평균 계산에서 제외되었습니다.",
+                    "",
+                ]
+            else:
+                lines.append("> 이상치 없음 (모든 데이터가 평균 ± 2σ 이내)")
+                lines.append("")
 
         # Mermaid 라인 차트
         trend_str = ", ".join(str(v) for v in trend)
         x_labels = ", ".join(f'"{i}"' for i in range(len(trend)))
         lines += [
+            "### PSS 추이 차트",
+            "",
             f"```mermaid",
             f"xychart-beta",
             f'    title "PSS 추이 — {result.scenario_name} (KB)"',
@@ -278,13 +311,13 @@ class ReportGenerator:
             "",
         ]
 
-        # 증가 추세 판정
-        if pct > 5:
-            lines.append(f"> ⚠️ **20회 반복 동안 PSS가 {pct:.1f}% 증가** — 메모리 누수 가능성 있음")
-        elif pct > 1:
-            lines.append(f"> ℹ️ PSS가 소폭 증가 ({pct:.1f}%) — 모니터링 필요")
+        # 누수 판정
+        if stats and stats.is_leaking:
+            lines.append(f"> ⚠️ **메모리 누수 감지:** 이상치 제거 후에도 {stats.growth_percent:+.1f}% 증가 → hprof 분석 필요")
+        elif stats and stats.growth_percent > 0.5:
+            lines.append(f"> ℹ️ PSS 소폭 증가 ({stats.growth_percent:+.1f}%) — 모니터링 권장")
         else:
-            lines.append(f"> ✅ PSS 안정적 (변화율 {pct:.1f}%)")
+            lines.append(f"> ✅ PSS 안정적 (변화율 {stats.growth_percent:+.1f}%)")
         lines.append("")
 
         return lines
