@@ -10,3 +10,22 @@ venv/
 .idea/
 .vscode/
 *.hprof
+
+# Local config (PC별 환경 — local.example.yaml만 추적)
+config/local.yaml
+
+# Work / samples / RAG persistence
+.work/
+samples/
+.rag/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Proposal / 사내 제출 문서 (로컬에만 보관)
+*.docx
+*.doc
+*.pdf
+*.pptx
+*.xlsx

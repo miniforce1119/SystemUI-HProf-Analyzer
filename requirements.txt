@@ -1,5 +1,7 @@
-# Core - 외부 의존성 없음 (stdlib만 사용)
-# hprof 파서, meminfo 파서, 보고서 생성 모두 순수 Python
+# Core
+# hprof 파서, meminfo 파서, 보고서 생성은 stdlib만 사용
+# config 로딩에 YAML 사용
+PyYAML>=6.0
 
 # Testing
 pytest>=7.0.0

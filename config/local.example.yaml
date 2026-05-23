@@ -1,0 +1,108 @@
+# SystemUI HProf Analyzer — Local Configuration
+#
+# 이 파일은 템플릿입니다. 각 PC에서 첫 셋업 시:
+#   1. cp config/local.example.yaml config/local.yaml
+#   2. 이 PC의 실제 경로/값으로 채워넣기
+#   3. python -m systemui_hprof_analyzer env-check
+#
+# local.yaml은 .gitignore. 이 파일(local.example.yaml)만 git 추적.
+# 새 항목을 local.yaml에 추가하면 이 파일도 동시에 갱신할 것.
+
+# ──────────────────────────────────────────────────────────────
+# environment
+# ──────────────────────────────────────────────────────────────
+# 이 PC가 어떤 환경인지 식별 (로그/리포트에 표시되는 라벨)
+# 값 예시: home, office, laptop
+environment: home
+
+# ──────────────────────────────────────────────────────────────
+# paths — 외부 도구 절대 경로
+# ──────────────────────────────────────────────────────────────
+paths:
+  # adb (Android Debug Bridge) - hprof 캡처에 사용
+  # 집 예시: C:\platform-tools\adb.exe
+  # 사내 예시: C:\tools\platform-tools-latest-windows\platform-tools\adb.exe
+  adb: C:\platform-tools\adb.exe
+
+  # hprof-conv - Android hprof → 표준 Java hprof 변환
+  # 보통 platform-tools 안에 함께 있음
+  hprof_conv: C:\platform-tools\hprof-conv.exe
+
+  # MAT (Eclipse Memory Analyzer) - ParseHeapDump.bat 위치
+  # 집 예시: C:\mat\ParseHeapDump.bat
+  # 사내 예시: 사내 PC 설치 경로
+  mat_parse_heap_dump: C:\mat\ParseHeapDump.bat
+
+  # Java 실행 파일 (MAT가 사용)
+  # MAT는 보통 Java 11+ 필요. JDK 8이면 업그레이드 검토.
+  # 집 PC 현재: C:\Program Files (x86)\AdoptOpenJDK\jre-8.0.242.08-hotspot\bin\java.exe (JDK 8, 업그레이드 필요할 수 있음)
+  # 사내 예시: OpenJDK Temurin
+  java: C:\Program Files\Java\jdk-17\bin\java.exe
+
+  # 작업 디렉토리 (hprof 변환 임시 파일, MAT 인덱스 등이 생성됨)
+  # 이 경로 아래에 자유롭게 쓰고 지워도 안전한 곳이어야 함
+  work_dir: C:\project\SystemUI-HProf-Analyzer\.work
+
+  # hprof 샘플 보관 디렉토리 (.gitignore 대상)
+  # 폰에서 캡처한 hprof를 여기에 모음
+  samples_dir: C:\project\SystemUI-HProf-Analyzer\samples
+
+# ──────────────────────────────────────────────────────────────
+# mat — MAT CLI 동작 옵션
+# ──────────────────────────────────────────────────────────────
+mat:
+  # MAT 인덱싱 시 JVM 힙 메모리 (125MB hprof는 4-8GB 필요)
+  # MEMORY_FLAG 환경변수로 ParseHeapDump.bat에 전달
+  memory_flag: "-Xmx6g"
+
+  # MAT CLI 한 번 호출의 timeout (초)
+  # 인덱스 생성: 1-5분, OQL 실행: 수십 초~수 분
+  timeout_seconds: 600
+
+  # OQL 결과 출력 포맷 선호 순위 (위에서부터 시도)
+  # 안정성 검증 후 가장 잘 동작하는 것을 첫 번째로
+  output_format_preference:
+    - csv
+    - html
+    - txt
+
+# ──────────────────────────────────────────────────────────────
+# llm — LLM provider 설정 (provider 추상화 계층 기준)
+# ──────────────────────────────────────────────────────────────
+llm:
+  # provider: anthropic | openai | internal
+  # 집: anthropic (Claude API)
+  # 사내: internal (사내 승인 모델)
+  provider: anthropic
+
+  # provider별 설정. 미사용 항목은 그대로 두거나 비워둠.
+  anthropic:
+    # API 키는 환경변수 ANTHROPIC_API_KEY를 우선. 여기에 직접 넣지 말 것.
+    api_key_env: ANTHROPIC_API_KEY
+    model: claude-sonnet-4-6
+
+  internal:
+    # 사내 LLM 엔드포인트 (사내 PC에서만 채움)
+    endpoint: ""
+    model: ""
+
+# ──────────────────────────────────────────────────────────────
+# rag — 벡터 DB / 유사 사례 검색 (Phase 4)
+# ──────────────────────────────────────────────────────────────
+rag:
+  # backend: chroma | sqlite | internal
+  backend: chroma
+  chroma:
+    persist_dir: C:\project\SystemUI-HProf-Analyzer\.rag\chroma
+
+# ──────────────────────────────────────────────────────────────
+# mail — 자동 메일 발송 (Phase 5, 사내 전용)
+# ──────────────────────────────────────────────────────────────
+mail:
+  # enabled: false면 모든 메일 동작은 mock (콘솔 출력)
+  # 집 PC에서는 항상 false 권장
+  enabled: false
+  smtp_host: ""
+  smtp_port: 25
+  from_address: ""
+  default_to: []

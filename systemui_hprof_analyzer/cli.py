@@ -23,7 +23,9 @@ SystemUI HProf Analyzer CLI
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -34,6 +36,7 @@ from .extractor import scan_test_archive
 from .parser import MeminfoParser, HprofParser
 from .analyzer import ScenarioAnalyzer, VersionComparator
 from .report import ReportGenerator
+from .config import ConfigError, load_config
 
 
 def cmd_scan(args):
@@ -183,6 +186,99 @@ def cmd_hprof_diff(args):
             print(f"  {name}: {count}개 ({size // 1024} KB)")
 
 
+def cmd_env_check(args):
+    """config/local.yaml 검증 + 외부 도구 경로 확인"""
+    import shutil
+    import subprocess
+
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as e:
+        print("[ERROR]")
+        print(e)
+        return 1
+
+    print(f"=== env-check ({cfg.environment}) ===")
+    print(f"config: {cfg.source_path}")
+    print()
+
+    checks: list[tuple[str, str, bool, str]] = []  # (label, path, ok, detail)
+
+    def _check_path(label: str, path: str, executable: bool = False) -> tuple[bool, str]:
+        if not path:
+            return False, "(설정 안됨)"
+        p = Path(path)
+        if not p.exists():
+            return False, "파일 없음"
+        if executable and not os.access(p, os.X_OK) and not str(p).lower().endswith((".exe", ".bat", ".cmd")):
+            return False, "실행 권한 없음"
+        return True, "ok"
+
+    p = cfg.paths
+    for label, path, executable in [
+        ("adb", p.adb, True),
+        ("hprof_conv", p.hprof_conv, True),
+        ("mat_parse_heap_dump", p.mat_parse_heap_dump, True),
+        ("java", p.java, True),
+    ]:
+        ok, detail = _check_path(label, path, executable)
+        checks.append((label, path, ok, detail))
+
+    # work_dir / samples_dir는 없으면 생성 가능 (디렉토리)
+    for label, path in [("work_dir", p.work_dir), ("samples_dir", p.samples_dir)]:
+        if not path:
+            checks.append((label, path, False, "(설정 안됨)"))
+            continue
+        pp = Path(path)
+        if pp.exists():
+            checks.append((label, path, pp.is_dir(), "ok" if pp.is_dir() else "디렉토리 아님"))
+        else:
+            checks.append((label, path, True, "없음 (필요 시 자동 생성)"))
+
+    width_label = max(len(c[0]) for c in checks)
+    width_path = max(len(c[1]) for c in checks)
+    print(f"{'TOOL':<{width_label}}  {'PATH':<{width_path}}  STATUS")
+    print("-" * (width_label + width_path + 12))
+    fail = 0
+    for label, path, ok, detail in checks:
+        mark = "OK " if ok else "FAIL"
+        print(f"{label:<{width_label}}  {path:<{width_path}}  [{mark}] {detail}")
+        if not ok:
+            fail += 1
+
+    # java 버전 확인 (있으면)
+    print()
+    if p.java and Path(p.java).exists():
+        try:
+            res = subprocess.run(
+                [p.java, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            ver_out = (res.stderr or res.stdout or "").strip().splitlines()
+            first = ver_out[0] if ver_out else "(no output)"
+            print(f"java -version: {first}")
+            if "1.8" in first or '"8' in first:
+                print("  WARN: MAT는 보통 Java 11+ 필요. JDK 업그레이드 검토 권장.")
+        except Exception as e:
+            print(f"java -version 실행 실패: {e}")
+
+    print()
+    print(f"LLM provider: {cfg.llm.provider}")
+    print(f"RAG backend:  {cfg.rag.backend}")
+    print(f"Mail enabled: {cfg.mail.enabled}")
+
+    if fail:
+        print()
+        print(f"[FAIL] {fail}개 항목이 준비되지 않았습니다.")
+        print("config/local.yaml의 paths 항목을 확인하세요.")
+        return 1
+    print()
+    print("[OK] 모든 필수 도구가 준비되었습니다.")
+    return 0
+
+
 def cmd_parse_meminfo(args):
     """meminfo 파일 파싱"""
     parser = MeminfoParser()
@@ -237,6 +333,13 @@ def main():
     meminfo_parser.add_argument("file", help="meminfo 파일")
     meminfo_parser.add_argument("--json", action="store_true", help="JSON 출력")
 
+    # env-check
+    env_parser = subparsers.add_parser(
+        "env-check",
+        help="config/local.yaml 검증 + 외부 도구 경로 확인",
+    )
+    env_parser.add_argument("--config", help="config 파일 경로 (기본: config/local.yaml)")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -249,6 +352,8 @@ def main():
         cmd_hprof_diff(args)
     elif args.command == "parse-meminfo":
         cmd_parse_meminfo(args)
+    elif args.command == "env-check":
+        sys.exit(cmd_env_check(args) or 0)
     else:
         parser.print_help()
 
