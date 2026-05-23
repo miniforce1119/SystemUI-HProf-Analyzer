@@ -66,6 +66,7 @@ Android SystemUI 성능 Regression의 **"객체 소속·생성 경로"** 까지 
 - `decisions.md` — 구조적 결정 기록
 - `conversation.md` — 대화/맥락 흐름
 - `docs/setup-toolchain.md` — 도구 설치 가이드
+- `docs/handover-checklist.md` — 외부(1)(2) → 사내(3) 이관 직전 체크리스트
 - `config/local.example.yaml` — 환경 경로 템플릿
 
 PC별 (gitignore):
