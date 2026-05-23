@@ -67,6 +67,8 @@ Android SystemUI 성능 Regression의 **"객체 소속·생성 경로"** 까지 
 - `conversation.md` — 대화/맥락 흐름
 - `docs/setup-toolchain.md` — 도구 설치 가이드
 - `docs/handover-checklist.md` — 외부(1)(2) → 사내(3) 이관 직전 체크리스트
+- `docs/project-pitch.md` — **발표/심사용 단일 진실 출처**. 새 사실/결정/측정 결과 생길 때마다 즉시 갱신
+- `docs/leak-test-app.md` — PoC 용 leak 앱 가이드 (Android Studio 빌드)
 - `config/local.example.yaml` — 환경 경로 템플릿
 
 PC별 (gitignore):
