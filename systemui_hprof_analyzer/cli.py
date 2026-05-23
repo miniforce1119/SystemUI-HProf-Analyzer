@@ -186,6 +186,40 @@ def cmd_hprof_diff(args):
             print(f"  {name}: {count}개 ({size // 1024} KB)")
 
 
+def cmd_convert_hprof(args):
+    """Android hprof → 표준 Java hprof 변환 (hprof-conv 래퍼)"""
+    from .utils import convert_hprof, HprofConverterError
+
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as e:
+        print("[ERROR]")
+        print(e)
+        return 1
+
+    try:
+        result = convert_hprof(
+            input_hprof=args.input,
+            output_hprof=args.output,
+            config=cfg,
+            overwrite=args.overwrite,
+        )
+    except FileExistsError as e:
+        print(f"[ERROR] {e}")
+        return 2
+    except HprofConverterError as e:
+        print(f"[ERROR] {e}")
+        return 3
+
+    print(f"[OK] hprof 변환 완료")
+    print(f"  입력  : {result.input_path}")
+    print(f"          {result.input_size:>15,} bytes  ({result.input_magic})")
+    print(f"  출력  : {result.output_path}")
+    print(f"          {result.output_size:>15,} bytes  ({result.output_magic})")
+    print(f"  변화  : {result.size_delta:+,} bytes")
+    return 0
+
+
 def cmd_env_check(args):
     """config/local.yaml 검증 + 외부 도구 경로 확인"""
     import shutil
@@ -340,6 +374,16 @@ def main():
     )
     env_parser.add_argument("--config", help="config 파일 경로 (기본: config/local.yaml)")
 
+    # convert-hprof
+    conv_parser = subparsers.add_parser(
+        "convert-hprof",
+        help="Android hprof (1.0.3) → 표준 Java hprof (1.0.2) 변환",
+    )
+    conv_parser.add_argument("input", help="입력 Android hprof 파일")
+    conv_parser.add_argument("output", help="출력 표준 hprof 파일")
+    conv_parser.add_argument("--config", help="config 파일 경로 (기본: config/local.yaml)")
+    conv_parser.add_argument("--overwrite", action="store_true", help="출력 파일 덮어쓰기")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -354,6 +398,8 @@ def main():
         cmd_parse_meminfo(args)
     elif args.command == "env-check":
         sys.exit(cmd_env_check(args) or 0)
+    elif args.command == "convert-hprof":
+        sys.exit(cmd_convert_hprof(args) or 0)
     else:
         parser.print_help()
 
