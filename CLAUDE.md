@@ -221,6 +221,8 @@ systemui_hprof_analyzer/
 
 ## 외부 도구 환경
 
+**상세 설치 절차**: `docs/setup-toolchain.md`
+
 ### 집 PC (이 PC, Windows)
 | 도구 | 상태 |
 |---|---|
@@ -228,6 +230,7 @@ systemui_hprof_analyzer/
 | adb / platform-tools | 미설치 |
 | hprof-conv | 미설치 (platform-tools에 포함) |
 | MAT | 미설치 |
+| Android Studio | 미설치 (Phase 2에서 필요) |
 
 ### 사내 PC (참고)
 | 도구 | 경로 |
