@@ -194,6 +194,38 @@
 
 ---
 
+## D13 — OQL 자동화 경로 (다음 세션 진입점)
+
+- **날짜**: 2026-05-23
+- **상태**: 미해결 (다음 세션에서 결정/시도)
+- **문제**: MAT GUI 에서는 OQL 이 정상 동작 (12 entries 검출, Path to GC Roots 추출)
+  하지만 **CLI 자동화는 막힘** — ParseHeapDump.bat 의 `-command=oql "..."` 가
+  PowerShell → cmd → .bat 인용 충돌로 OQL 토큰을 잘못 파싱.
+  사내 Cline SR 에서 막혔던 영역과 정확히 같은 지점.
+- **시도해본 우회** (모두 실패):
+  - `-command="oql \"...\""` (이스케이프) → 따옴표 깨짐
+  - `--%` (PowerShell stop-parsing) → 멀티라인 모드 들어감
+  - 변수에 담아 전달 → 토큰 분리되어 report id 로 해석됨
+- **후보 경로** (다음 세션 우선순위):
+
+  | 우선 | 방법 | 특징 |
+  |---|---|---|
+  | **A** | ParseHeapDump.bat `-command=oql` 의 인용 문제를 더 다양한 패턴으로 재시도 (cmd.exe 래퍼, .bat 래퍼, argfile 등) | 가장 단순, 풀리면 끝 |
+  | B | ParseHeapDump.bat 의 미리 정의된 report ID (`org.eclipse.mat.api:suspects` 등) | 임의 OQL 안 됨, 제한적 |
+  | **C** | MAT Headless / Java 클래스 직접 호출 | 정석, Java 깊이 필요 |
+  | D | shark-cli (Square) | OQL 아니지만 leak 분석 가능 |
+  | **E** | Python 자체 hprof 그래프 추적 (`hprof_parser` 확장) | MAT 의존 0, 시간 많이 듦, 최후 보루 |
+
+- **진행 전략** (D8 다층 방어 정신):
+  **A 먼저 → 안 풀리면 C → 그래도 안 되면 E** 로 순차 시도.
+  각 시도의 실패 패턴을 `decisions.md` 또는 `utils/mat_cli.py` docstring 에 누적
+  → 사내에서 같은 함정 회피.
+- **참고**: GUI 가 동작했다는 사실은 MAT 의 인덱싱/OQL 엔진이 살아있다는 증거이므로,
+  CLI 가 못 푸는 건 인용/프로세스 문제일 가능성 큼 (OQL 엔진 자체 문제 아님).
+  따라서 A 가 풀릴 가능성이 의외로 클 수 있음.
+
+---
+
 ## (Template) D? — <제목>
 
 - **날짜**: YYYY-MM-DD

@@ -405,3 +405,144 @@ claude          # Claude 가 CLAUDE.md/decisions.md/conversation.md 읽고 시�
 를 다루는 도구이고, 리포 로컬 복제는 git clone 이 함. `/init` 슬래시 커맨드는
 CLAUDE.md 가 없을 때 새로 만드는 명령이므로, 이미 있는 우리 리포에서는 쓸 필요 없음
 (오히려 덮어쓸 위험).
+
+---
+
+## 27. Phase 1 PoC — 도구 체인 외부 검증 (2026-05-23 후반)
+
+> 같은 날 오후, 하네스 셋업 + 도구 설치 마친 직후 실제 PoC 진입.
+> 사내에서 막혔던 MAT/OQL 영역이 외부에서 동작 확인됨.
+
+### 27.1 도구 설치 (집 PC)
+
+가이드(`docs/setup-toolchain.md`) 따라 진행:
+
+| 도구 | 설치 경로 | 비고 |
+|---|---|---|
+| platform-tools | `C:\tools\platform-tools\` | adb 1.0.41, hprof-conv 포함 |
+| Java 17 (Temurin) | `C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot\` | 이미 설치되어 있었음. JDK 8 제거 완료 |
+| MAT | `C:\tools\mat\` | Standalone, Windows x86_64. MemoryAnalyzer.ini 의 `-Xmx1024m` → `-Xmx6g` 변경 |
+| Android Studio | 기본 경로 | LeakTest 빌드용 |
+
+`env-check` 모든 항목 [OK].
+
+### 27.2 LeakTest 앱 작성 및 빌드
+
+- 가이드: `docs/leak-test-app.md`
+- 위치: `C:\Users\head1\AndroidStudioProjects\LeakTest`
+- 패턴: `ActivityHolder.sActivities` (static ArrayList) 에 MainActivity 인스턴스 누적
+- 각 인스턴스 1MB `LeakablePayload` 보유 → retained heap 측정 명확
+
+### 27.3 hprof 캡처
+
+폰 (Samsung Galaxy S24 Ultra, SM-S948N, Android 16):
+- 1차 hprof: 49.8MB (인스턴스 1개만 — 단순 LEAK 탭은 같은 인스턴스 반복 추가였음)
+- 2차 hprof: 66.1MB (회전 + LEAK 조합으로 12개 인스턴스 누적)
+
+발견된 함정 (decisions.md D12 에 영속화):
+- Samsung Auto Blocker → USB 디버깅 그레이 처리 (해제 절차 기록)
+- Git Bash 의 `/data/local/tmp` 자동 변환 → `MSYS_NO_PATHCONV=1` 필요
+
+### 27.4 hprof-conv 변환
+
+`hprof-conv.exe samples/leak_first.hprof .work/leak_first_converted.hprof`
+
+- Android 1.0.3 → 표준 1.0.2 (magic byte 변환 확인)
+- 크기 49,804,854 → 49,721,415 bytes (-83KB)
+
+### 27.5 MAT 인덱싱 (사내에서 막혔던 첫 지점)
+
+`ParseHeapDump.bat leak_first_converted.hprof`
+
+- 약 1-2분 소요
+- 11개 .index 파일 정상 생성 (a2s, domIn, domOut, idx, inbound, outbound, ...)
+- `Calculating minimum retained heap size for classes` 까지 정상 종료
+- → **사내 Cline SR 에서 막혔던 인덱싱 단계 외부에서 성공**
+
+### 27.6 OQL 시도 — CLI 실패, GUI 성공
+
+CLI 시도 (`ParseHeapDump.bat -command="oql ..."`):
+- PowerShell → cmd → .bat 인용 충돌로 OQL 토큰들이 따로 보고서 ID 로 해석됨
+- 여러 우회 시도 모두 실패: `--%`, `\"..\"`, 변수 변수
+- 결론: **ParseHeapDump.bat 의 `-command=oql` 경로는 PowerShell 환경에서 안정적이지 않음**
+
+GUI 시도:
+- MAT GUI 에서 hprof 열기 (인덱스 이미 있어 즉시 로드)
+- OQL 패널에서 `SELECT * FROM com.example.leaktest.MainActivity` 실행
+- **Total: 12 entries** — 12개 MainActivity 인스턴스 검출
+- 각 인스턴스 retained heap ≈ 1,055KB (1MB payload 정확히 잡힘)
+- 1개 인스턴스 우클릭 → Merge Shortest Paths to GC Roots → 트리 추출 성공:
+  ```
+  Thread → contextClassLoader → ActivityHolder → sActivities → elementData → MainActivity
+  ```
+
+### 27.7 PoC 검증 결과 영구화
+
+증거 영구 저장:
+- `docs/screenshots/poc_01_path_to_gc_roots.png`
+- `docs/screenshots/poc_02_oql_12_instances.png`
+- `project-pitch.md` 7.3 결과 섹션 — TBD → 실측 데이터로 갱신
+- `decisions.md` D12 — 외부 PoC 1차 검증 성공 + 발견 함정 3개
+- `handover-checklist.md` B 섹션 — 항목별 체크 표시
+
+### 27.8 hprof_converter.py 코드화
+
+손으로 검증된 hprof-conv 호출을 Python 래퍼로:
+- `systemui_hprof_analyzer/utils/hprof_converter.py` (162 lines)
+- `cli.py` 에 `convert-hprof` 서브커맨드 추가
+- 9개 단위 테스트 (`tests/test_hprof_converter.py`) 모두 통과
+- 손으로 만든 파일과 코드로 만든 파일이 바이트 단위 정확히 동일 (`cmp` 검증)
+
+### 27.9 ★ 미완성 인지 — OQL 자동화 (중단)
+
+사용자가 정확히 지적: "MAT GUI 로 하면 자동화가 안 되는 거 아니야?"
+
+→ 정확. GUI 동작 확인 = MAT 의 인덱싱/OQL 엔진이 살아있다는 증거지만,
+**"자동화 도구"의 PoC 로는 절반만 완료된 상태.** OQL CLI 자동화는 사내 Cline SR
+실패 지점 그대로. 이걸 풀어야 발표 자료의 핵심인 "사람 없이 결과 추출" 이 됨.
+
+후보 경로:
+- **A**: ParseHeapDump.bat `-command=oql` 의 인용 문제를 다양한 패턴으로 다시 시도 (가장 단순)
+- **B**: ParseHeapDump.bat 의 report ID 방식 (임의 OQL 안 됨, 제한적)
+- **C**: MAT Headless / Java 클래스 직접 호출 (정석, Java 깊이 필요)
+- **D**: shark-cli (Square) — OQL 은 아니지만 leak 분석 가능
+- **E**: Python 자체 hprof 그래프 추적 (MAT 의존 0, 시간 많이 듦)
+
+D8 (다층 방어) 정신에 따라 A → C → E 순차 시도가 자연스러움.
+**다음 세션에서 이 결정부터.**
+
+### 27.10 이번 세션 git 이력 (Phase 0 + Phase 1 일부)
+
+| 커밋 | 내용 |
+|---|---|
+| `f048280` | feat: 하네스 셋업 (CLAUDE.md, decisions.md, config, env-check) |
+| `99345c1` | docs: 외부 도구 설치 가이드 |
+| `770c52d` | docs: conversation.md 세션 26 |
+| `32fa16a` | docs: 3-PC 토폴로지 반영 (.clinerules ↔ CLAUDE.md) |
+| `6ad259a` | docs: handover 체크리스트 |
+| `efa30c9` | docs: project-pitch + leak 앱 가이드 |
+| `cad3639` | docs: PoC 1차 검증 영구화 (스크린샷 + D12) |
+| `d41a410` | feat: hprof_converter 코드화 + 9개 단위 테스트 |
+
+### 27.11 다음 세션 (집 PC 또는 강의장 PC) 진입 시 할 일
+
+1. **OQL 자동화 경로 결정** (위 후보 A~E 중 A 부터)
+2. A 가 풀리면 `utils/mat_cli.py` 작성:
+   - 인덱싱 호출 (`ParseHeapDump.bat` subprocess)
+   - OQL 호출 + 결과 파싱
+   - 실패 OQL 패턴 로깅
+3. `cli.py` 에 `trace-refs <class>` 서브커맨드 추가
+4. (Phase 1 마무리) `analyze-leak <hprof>` 통합 명령 — 캡처는 별도, 변환 + 인덱싱 + OQL + 보고서까지
+
+### 27.12 다음 세션 시작 절차 (어느 PC 든)
+
+```powershell
+cd <repo path>
+git pull
+.venv\Scripts\Activate.ps1     # 이미 venv 있으면
+# (회사 강의장 PC 처음이면 setup-toolchain.md 따라 셋업)
+python -m systemui_hprof_analyzer env-check  # 도구 OK 확인
+```
+
+Claude Code 가 CLAUDE.md / decisions.md / conversation.md 자동 로드 →
+"27.9 미완성 인지" 부터 이어서 작업.
