@@ -244,3 +244,164 @@ Cline 작업 항목:
 - [ ] (Cline) 전체 파이프라인 E2E 테스트 (실제 사내 데이터)
 - [ ] mkdocs 연동 (보고서 → GitHub Pages 배포)
 - [ ] (선택) Agent Builder 메일 발송 연동
+
+---
+
+## 26. Claude Code 하네스 전환 + 재설계 (2026-05-23)
+
+> 사내 Cline SR 로 진행하다 막힌 부분(MAT CLI 연동 실패)을 풀기 위해
+> 집/회사 멀티 PC 환경에서 Claude Code 하네스 기반으로 재출발.
+
+### 26.1 전환 배경
+
+**사용자:**
+회사 안에서는 Cline SR 이라는 AI code assistant 를 사용했음. MAT CLI 를 붙이려고 했는데
+계속 에러가 나서 한동안 안 하다가 다시 해 보려고 함. 이번엔 Claude Code 하네스로 가고
+싶음. 그리고 집에서 만들다가 회사 PC 에서 이어 작업할 수도 있어서, 같은 환경이 유지돼야 함.
+
+**AI (Claude):**
+멀티 PC 작업이 전제라면 하네스 가치가 더 큼. 자동 메모리만으로는 PC 간 동기화가 안 되므로
+구조적 결정은 git 추적 파일에 명시적으로 남겨야 함. 그래서 다음 영속화 계층을 도입:
+
+| 파일 | 역할 |
+|---|---|
+| CLAUDE.md | 매 세션 자동 로드되는 프로젝트 컨텍스트 |
+| decisions.md | 구조적 결정 기록 (D1~D9) |
+| conversation.md | 대화/맥락 흐름 (시간순) |
+| config/local.example.yaml | 환경 경로 템플릿 |
+| config/local.yaml | 각 PC 실제 설정 (gitignore) |
+
+### 26.2 본질 문제 재정의
+
+이전 도구로 풀지 못했던 것을 재확인:
+
+| 시도 | 한계 |
+|---|---|
+| bugreport diff | leak 의심 객체 자체를 못 찾음 |
+| hprof before/after diff | "객체가 늘었다" 까지만, 누구 소속인지 모름 |
+| MAT CLI 참조 체인 추적 | 사내 Cline SR 로 시도, OQL 문법 에러 / 빈 결과 계속 |
+
+→ 진짜 목표: "TextView +194" 가 아니라
+**"QSPanel.mTileLayout.mTiles 에 이전 타일이 안 빠지고 쌓이는 게 원인"** 까지.
+객체 증가 + GC Root 까지의 참조 체인 + 자연어 가설.
+
+### 26.3 우선순위 재정렬
+
+제안서 단계 순서 대신:
+
+```
+[1] MAT/hprof PoC 코어 ← 이전에 막혔던 곳, 안 풀리면 나머지 무의미
+[2] hprof + LLM 자연어 보고
+[3] bugreport triage + Agent  (제안서 메인 파이프라인은 (1)(2) 후로)
+[4] RAG / 유사 사례 DB
+[5] 메일 자동화
+```
+
+### 26.4 PoC-first 전략
+
+집에서 PoC 끝낸 후 사내 포팅. 사내 환경 의존성은 모두 config 로 격리.
+
+- hprof 샘플: 본인 안드로이드 폰 + 직접 작성한 테스트 앱 (Activity 가 static
+  리스트에 자기 자신 추가하는 전형적 leak)
+- adb shell am dumpheap 으로 캡처 (자기 앱은 root 없이 가능)
+- 사내 검증은 사내 regression test 시스템의 실제 SystemUI hprof 로
+
+### 26.5 멀티 PC 셋업 절차 확정
+
+새 PC 첫 셋업 (집/회사 동일):
+
+```
+1. git clone (회사의 경우) 또는 git pull
+2. python -m venv .venv
+3. .venv\Scripts\Activate.ps1
+4. pip install -r requirements.txt
+5. cp config\local.example.yaml config\local.yaml
+6. local.yaml 의 paths 를 해당 PC 경로로 채움
+7. python -m systemui_hprof_analyzer env-check
+```
+
+추가된 코드:
+- `systemui_hprof_analyzer/config/loader.py`: YAML config 로더
+- `cli.py` 에 `env-check` 서브커맨드: 도구 경로/Java 버전 검증
+- `requirements.txt` 에 PyYAML 추가
+- `.gitignore`: `config/local.yaml`, `.venv/`, `.work/`, `samples/`, `.rag/`,
+  `*.docx` (제안서 포함) 등 추가
+
+### 26.6 도구체인 설치 (집 PC)
+
+설치 가이드를 `docs/setup-toolchain.md` 에 영구 문서화. 이 문서가 회사 PC 에서도
+같은 절차를 보장.
+
+설치 진행 결과:
+
+| 도구 | 결과 |
+|---|---|
+| platform-tools | `C:\tools\platform-tools\` (adb 1.0.41, hprof-conv) |
+| Java 17 | `C:\Program Files\Eclipse Adoptium\jdk-17.0.19.10-hotspot\` (Temurin) |
+| → 기존 JDK 8 | 제거 완료 (PATH 자동 정리) |
+| MAT | `C:\tools\mat\` (Standalone, Windows x86_64) |
+| → MemoryAnalyzer.ini | `-Xmx1024m` → `-Xmx6g` 로 변경 |
+| Android Studio | 보류 (Phase 2 진입 시) |
+
+`env-check` 최종: **[OK] 모든 필수 도구가 준비되었습니다.**
+
+ParseHeapDump.bat 빈 인자 실행으로 살아있음 확인 (`java.version=17.0.19`,
+`Usage: [options] <snapshot>` 메시지 = 정상 의도된 출력).
+
+### 26.7 알려진 함정 누적
+
+CLAUDE.md "알려진 함정" 섹션에 다음 기록:
+- ParseHeapDump 기본 힙 1GB → 6GB 이상 필요
+- Android hprof 그대로 입력 시 깨짐 (hprof-conv 필수)
+- OQL 문법 버전 차이 → 단일 문법에 의존 말고 라이브러리화
+- 인덱스 캐시 충돌 / 출력 포맷 불안정
+
+### 26.8 결정사항 D1~D9
+
+`decisions.md` 에 영속화:
+- D1: 멀티 PC 작업 전제
+- D2: PoC-first 개발 전략
+- D3: 작업 우선순위 재정렬
+- D4: hprof 메인 입력, bugreport 보조
+- D5: PoC 샘플은 개인 폰 + 테스트 앱
+- D6: config/local.yaml 방식
+- D7: decisions.md / conversation.md 분리
+- D8: MAT 실패 우회 (OQL 대체 + Python fallback)
+- D9: 표준 venv (uv/Poetry 아님)
+
+### 26.9 git 이력
+
+이 세션의 커밋:
+- `f048280` feat: Claude Code 하네스 셋업 (멀티 PC 작업 지원)
+- `99345c1` docs: 외부 도구 설치 가이드 추가 (집/회사 PC 공통)
+
+### 26.10 다음 단계 (Phase 1 진입)
+
+- [ ] 폰 USB 연결 → `adb devices` 동작 확인
+- [ ] 아무 앱이나 `adb shell am dumpheap` 으로 첫 hprof 캡처
+- [ ] `hprof-conv` 로 변환 후 MAT 인덱싱 → 6GB 설정 실효성 검증
+- [ ] OQL 첫 시도 (사내에서 막혔던 패턴 재현 또는 돌파)
+- [ ] `utils/hprof_converter.py` 작성 (hprof-conv 래퍼)
+- [ ] `utils/mat_cli.py` 작성 (MAT CLI 래퍼 + OQL 라이브러리 + 실패 패턴 로깅)
+- [ ] (Phase 2 진입 직전) Android Studio 설치 + 테스트 leak 앱
+
+### 26.11 회사 PC 에서 이어 작업할 때
+
+```
+[처음 한 번]
+git clone https://github.com/miniforce1119/SystemUI-HProf-Analyzer.git
+cd SystemUI-HProf-Analyzer
+claude          # Claude Code 시작 → CLAUDE.md 자동 로드 (/init 불필요)
+# 위의 26.5 절차로 venv + config 셋업
+# 사내는 도구가 이미 설치되어 있을 가능성 높음 → 경로만 local.yaml 에 등록
+
+[이후 매번]
+cd SystemUI-HProf-Analyzer
+git pull
+claude          # Claude 가 CLAUDE.md/decisions.md/conversation.md 읽고 시작
+```
+
+**중요:** GitHub MCP 와 git clone 은 다른 것. GitHub MCP 는 Claude 가 GitHub API
+를 다루는 도구이고, 리포 로컬 복제는 git clone 이 함. `/init` 슬래시 커맨드는
+CLAUDE.md 가 없을 때 새로 만드는 명령이므로, 이미 있는 우리 리포에서는 쓸 필요 없음
+(오히려 덮어쓸 위험).
