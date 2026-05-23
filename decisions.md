@@ -162,6 +162,38 @@
 
 ---
 
+## D12 — 외부 PoC 1차 검증 성공 (사내에서 막혔던 영역)
+
+- **날짜**: 2026-05-23
+- **결정/사실**: Samsung Galaxy S24 Ultra + LeakTest 앱 으로 외부 PoC 도구 체인 전체 검증 완료.
+  사내 Cline SR 에서 막혀있던 MAT/OQL 영역이 외부에서 정상 동작함을 확인.
+- **검증된 단계**:
+  1. `adb shell am dumpheap` 으로 Android hprof 캡처 (49.8MB → 66.1MB)
+  2. `hprof-conv` 로 Android 1.0.3 → 표준 1.0.2 변환 (magic byte 검증)
+  3. `ParseHeapDump.bat` 인덱싱 (`-Xmx6g`, 11개 .index 파일 생성)
+  4. MAT GUI 에서 OQL 실행: `SELECT * FROM com.example.leaktest.MainActivity` → **Total: 12 entries**
+  5. Merge Shortest Paths to GC Roots → leak 진원지 (`ActivityHolder.sActivities`) 까지 트리 추출
+- **증거**:
+  - `docs/screenshots/poc_01_path_to_gc_roots.png`
+  - `docs/screenshots/poc_02_oql_12_instances.png`
+  - `samples/leak_first.hprof`, `samples/leak_second.hprof` (gitignore 이지만 로컬에 보존)
+- **함의**:
+  - **이 시점부터 D8(MAT 실패 우회) 의 "Python fallback" 우선순위가 낮아짐.** MAT 가 동작하므로 1차 경로로 충분.
+  - Python fallback 은 사내에서 다시 실패할 경우의 보험으로만 남김.
+  - 발표 자료에서 "사내 막힘 → 외부 PoC 로 돌파" 라는 서사의 결정적 증거.
+- **다음**: CLI 자동화 (utils/hprof_converter.py, utils/mat_cli.py) 로 GUI 검증 단계를 코드화.
+
+### 외부 PoC 중 발견한 추가 함정
+- **PowerShell → cmd .bat 인용 충돌**: ParseHeapDump.bat 에 OQL 같은 복잡한 인자를 PowerShell 에서 전달하면
+  큰따옴표/별표/공백 이 깨짐. `--%` 도 완전히 해결 못 함. → CLI 자동화는 GUI 처럼
+  Eclipse 의 OQL endpoint 를 다른 방법으로 호출하거나, MAT report ID 방식 또는 Python 자체 그래프 추적
+  으로 우회 필요.
+- **Auto Blocker (Samsung)**: One UI 6+ 에서 USB 디버깅이 그레이 처리되는 원인.
+  설정 → 보안 및 개인정보 → Auto Blocker OFF 로 해제.
+- **Git Bash 의 `/data/local/tmp` 경로 자동 변환**: `MSYS_NO_PATHCONV=1` 필요.
+
+---
+
 ## (Template) D? — <제목>
 
 - **날짜**: YYYY-MM-DD

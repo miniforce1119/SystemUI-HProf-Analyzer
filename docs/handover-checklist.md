@@ -34,12 +34,20 @@
 
 핵심: **사내에서 "또 안 돌아간다" 가 없게.**
 
-- [ ] `env-check` 모든 항목 [OK] (외부 PC 기준)
+- [x] `env-check` 모든 항목 [OK] (외부 PC 기준) — 2026-05-23
 - [ ] hprof-conv 자동 호출 (`utils/hprof_converter.py`) — 정상 hprof 변환 확인됨
-- [ ] MAT CLI 인덱싱 — 125MB hprof 정상 인덱싱 (`-Xmx6g` 실효성 확인)
-- [ ] MAT CLI OQL — 적어도 한 종류의 참조 체인 추출 성공
+  - 손으로는 검증 완료 (2026-05-23, magic byte 1.0.3 → 1.0.2 확인). 코드화 대기.
+- [x] MAT CLI 인덱싱 — 50MB hprof 정상 인덱싱 (`-Xmx6g` 동작 확인) — 2026-05-23
+  - 사내 125MB 에서 시간/메모리 거동은 사내 진입 후 재확인 필요
+- [x] MAT GUI OQL — 12개 인스턴스 추출 + Path to GC Roots 트리 — 2026-05-23
+  - **CLI 자동화는 별도 항목**: PowerShell→cmd→.bat 인용 충돌로 ParseHeapDump.bat `-command=oql`
+    경로가 막힘. 다른 길 필요 (mat-headless, report ID, Python 자체 그래프 등)
+- [ ] OQL CLI 자동화 — GUI 가 아닌 코드에서 결과 추출
 - [ ] OQL 실패 시 대체 문법 라이브러리 동작 확인 (실패 패턴 로깅 포함)
 - [ ] (추가 발견 시 여기에 누적)
+  - **2026-05-23**: Samsung Auto Blocker 가 USB 디버깅을 그레이 처리. 설정→보안→Auto Blocker OFF
+  - **2026-05-23**: Git Bash 의 `/data/...` 경로 자동변환 → `MSYS_NO_PATHCONV=1` 필요
+  - **2026-05-23**: PowerShell 의 인용 규칙으로 ParseHeapDump.bat `-command=oql "..."` 전달이 깨짐
 
 ---
 

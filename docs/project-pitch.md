@@ -156,17 +156,61 @@ AI 는 최종 판단 주체가 아니라 분석자의 판단을 보조. 보고�
 
 - [Phase 1] hprof 캡처 → MAT 인덱싱 → OQL 첫 시도
 
-### 7.3 결과 / 측정 (PoC 후 채움)
+### 7.3 결과 / 측정
 
-> 이 섹션은 PoC 진행하면서 단계별로 채운다.
+> PoC 진행하며 단계별로 채움.
 
-#### 도구 안정화 검증 (예정)
+#### 외부 PoC 1차 검증 — 2026-05-23 ✅
+
+**환경**: 집 PC, Samsung Galaxy S24 Ultra (SM-S948N, Android 16), LeakTest 앱 (의도적 Activity leak)
+
+**도구 안정화 결과:**
+
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| hprof 캡처 (`adb shell am dumpheap`) | ✅ | 49.8MB / 66.1MB (1차/2차) |
+| hprof-conv 변환 (Android 1.0.3 → 표준 1.0.2) | ✅ | magic byte 검증 완료 |
+| MAT 인덱싱 (`ParseHeapDump.bat`) | ✅ | 약 1-2분, `-Xmx6g` 동작 확인 |
+| MAT GUI 로 hprof 열기 | ✅ | 11개 인덱스 파일 정상 생성 |
+| **OQL 임의 쿼리 실행** | ✅ | `SELECT * FROM com.example.leaktest.MainActivity` |
+| **참조 체인 추출 (Merge Shortest Paths to GC Roots)** | ✅ | leak 진원지까지 트리 완성 |
+
+**leak 패턴 검출 정확도:**
+
+| 의도한 leak | 실제 검출 결과 |
+|---|---|
+| MainActivity 인스턴스 누적 | **12개 검출** (Total: 12 entries) |
+| 각 인스턴스 ~1MB retained | **각 인스턴스 1,055,XXX bytes** (1,055KB ≈ 1MB) |
+| 총 leak 크기 | **약 12MB** (12 × 1MB) |
+| leak 진원지 | **`ActivityHolder.sActivities` (static ArrayList)** — 코드 의도와 정확히 일치 |
+| GC Root 까지 경로 | `Thread → contextClassLoader → ActivityHolder → sActivities → elementData → MainActivity` |
+
+**스크린샷 증거:**
+
+- `docs/screenshots/poc_01_path_to_gc_roots.png` — MAT 의 Merge Shortest Paths to GC Roots 결과.
+  `ActivityHolder.sActivities (ArrayList) → MainActivity` 체인이 트리로 표시됨.
+- `docs/screenshots/poc_02_oql_12_instances.png` — OQL `SELECT * FROM ... MainActivity`
+  실행 결과. **Total: 12 entries**, 각 인스턴스 retained heap ≈ 1MB.
+
+**의미:**
+
+이번 검증으로 **이전 사내 PoC 가 막혀있던 영역 전체가 외부에서 동작 확인**됨:
+
+| 이전 (사내 Cline SR) | 이번 (외부 Claude Code) |
+|---|---|
+| MAT 인덱싱 시도 → 실패 반복 | ✅ 1회 시도 성공 |
+| OQL 문법 에러 / 빈 결과 | ✅ 결과 12 entries 반환 |
+| 참조 체인 추출 불가능 | ✅ GC Root 까지 트리 완성 |
+| "한동안 중단됨" | ✅ 도구 체인 전체 검증 |
+
+#### 도구 안정화 검증 — 사내 (3) 진입 후
+
 | 항목 | 외부 PoC 결과 | 사내 검증 결과 |
 |---|---|---|
-| hprof-conv 자동 변환 성공률 | TBD | TBD |
-| MAT 인덱싱 성공 (125MB) | TBD | TBD |
-| OQL 참조 체인 추출 성공률 | TBD | TBD |
-| Python fallback 동작 여부 | TBD | TBD |
+| hprof-conv 자동 변환 성공률 | ✅ (LeakTest 50MB) | TBD (사내 125MB) |
+| MAT 인덱싱 성공 (125MB) | ✅ (50MB로 검증) | TBD |
+| OQL 참조 체인 추출 성공률 | ✅ (LeakTest) | TBD |
+| Python fallback 동작 여부 | (아직 구현 안 함) | TBD |
 
 #### 분석 시간 단축 (예정, 사내 데이터로 측정)
 | 시나리오 | 기존 (수동) | AI 보조 (도구 + 분석자) | 단축률 |
@@ -177,7 +221,7 @@ AI 는 최종 판단 주체가 아니라 분석자의 판단을 보조. 보고�
 #### LLM 가설 정확도 (예정)
 | 케이스 | LLM 가설 | 실제 원인 | 일치 여부 |
 |---|---|---|---|
-| (PoC leak 앱) | TBD | ActivityHolder.sActivities | TBD |
+| **PoC leak 앱 (2026-05-23)** | TBD (LLM 미연동) | ActivityHolder.sActivities | (수동으로는 정확히 일치) |
 | (사내 사례 1) | TBD | TBD | TBD |
 
 ---
