@@ -122,6 +122,46 @@
 
 ---
 
+## D10 — 3-PC 토폴로지: 외부(1)(2) → 사내(3) 단방향
+
+- **날짜**: 2026-05-23
+- **결정**: 이 프로젝트는 세 환경에서 운영된다.
+  - (1) 집 PC: Claude Code, 자유
+  - (2) 회사 강의장 PC (사외망): Claude Code, 집과 동등
+  - (3) 사내망 PC: **Cline 사용** (Claude Code 미사용/미설치), 외부 push 불가
+  - 데이터 흐름: (1) ⇄ (2) ⇄ GitHub.com → (3) 단방향 pull
+  - (3)에서의 commit/push는 사내 GitLab으로만
+- **이유**:
+  - 사내 보안 정책상 (3)에서 외부 GitHub.com push 금지
+  - (3)에서는 사내 SystemUI hprof, bugreport 등 민감 데이터를 다루므로
+    한 번 들어가면 그 데이터/변경 사항은 외부로 못 나옴
+  - 따라서 외부에서 최대한 PoC를 완성한 후 (3)으로 이관해 사내 데이터로 최종 검증
+- **적용**:
+  - `CLAUDE.md` 와 `.clinerules` 두 파일 동기 유지 (Cline은 CLAUDE.md 안 읽음)
+  - (3)에서는 git remote 구분 필수: `origin`=GitHub.com (push 금지), `internal`=사내 GitLab (push 가능)
+  - 외부 PoC 코드의 모든 환경 의존성은 `config/local.yaml`로 격리 (이미 D6)
+  - 외부에서 LLM provider 추상화 필수, 사내(3)에서 `internal` provider 구현 바인딩
+  - 외부 → 사내 이관 직전 체크리스트는 `docs/handover-checklist.md`에 영속화 (PoC 진행 후 작성 예정)
+
+---
+
+## D11 — .clinerules 와 CLAUDE.md 동기 유지
+
+- **날짜**: 2026-05-23
+- **결정**: Cline은 `CLAUDE.md`를 자동으로 읽지 않고 `.clinerules`만 읽는다.
+  따라서 두 파일은 같은 프로젝트의 같은 상태를 반영해야 하며, 한쪽 변경 시 다른 쪽도 동기화.
+- **이유**:
+  - (3) 사내 PC에서 Cline이 옛 컨텍스트(예: 멀티 PC 전제 없음)로 시작하면 잘못된 결정을 함
+  - 이번 세션에서 발견된 차이: 기존 `.clinerules`는 4월 29일자, `CLAUDE.md`는 5월 23일자였음
+- **적용**:
+  - `.clinerules`를 `CLAUDE.md` 기준으로 재작성 (이번 세션에서 처리됨)
+  - 향후 컨텍스트 변경 시 두 파일 동시 갱신
+  - `.clinerules` 톤은 사내 환경(3) 관점 (Cline이 읽기 좋게)
+  - `CLAUDE.md` 톤은 외부 환경(1)(2) 관점
+  - 공통 내용 (과제 맥락, MAT 함정, 우선순위 등)은 두 파일에 모두
+
+---
+
 ## (Template) D? — <제목>
 
 - **날짜**: YYYY-MM-DD

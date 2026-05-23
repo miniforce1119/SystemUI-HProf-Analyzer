@@ -1,123 +1,229 @@
-# Cline Rules — SystemUI HProf Analyzer 사내 포팅
+# Cline Rules — SystemUI HProf Analyzer 사내 작업
 
-## 역할
-이 프로젝트는 2번 테스트 시스템(hprof 포함) 데이터를 분석하는 도구입니다.
-실제 사내 데이터로 테스트하고 파서를 조정하는 것이 주 작업입니다.
+> 이 파일은 **사내망 PC(3)에서 Cline이 사용하는 컨텍스트**입니다.
+> 집/강의장 PC에서는 Claude Code가 `CLAUDE.md`를 읽습니다.
+> 두 파일은 같은 프로젝트의 같은 결정을 반영해야 하며, 한쪽 갱신 시 다른 쪽도 동기화할 것.
 
-## 사내 환경
-- hprof-conv 경로: C:/tools/platform-tools-latest-windows/platform-tools/hprof-conv.exe
-- MAT 설치됨 (ParseHeapDump CLI 사용 가능)
-- Java 설치됨 (OpenJDK Temurin)
+---
 
-## 분석 파이프라인 (전체 흐름)
+## 한 줄 요약
 
-### 자동화 대상
+Android SystemUI 성능 Regression의 **"객체 소속·생성 경로"**까지 자동 분석하는 AI 보조 도구.
+
+---
+
+## 이 PC가 어느 환경인지 (가장 중요)
+
+이 프로젝트는 세 환경에서 작업됩니다:
+
+| 환경 | 도구 | 역할 |
+|---|---|---|
+| (1) 집 PC | Claude Code | PoC 코어 개발, 자유 실험 |
+| (2) 회사 강의장 PC (사외망) | Claude Code | 외부 작업 연장, 외부 데이터 처리 |
+| (3) **사내망 PC (← 지금 여기, Cline)** | **Cline** | **사내 데이터 결합, 최종 검증** |
+
+### (3) 사내망 PC의 제약 (Cline이 반드시 인지)
+- **외부 GitHub.com push 불가** — 사내→외부 코드 반출 금지
+- 외부에서 GitHub.com pull은 가능 (단방향)
+- 사내 GitLab/Git 서버에 push 하여 사내 동료와 협업
+- 사내 Bugreport, SystemUI hprof 등 **민감 데이터는 외부로 절대 나가서는 안 됨**
+
+### git remote 사용 규칙 (중요)
+- `origin` = GitHub.com (외부) — **(3)에서 push 금지**
+- `internal` (또는 다른 이름) = 사내 GitLab — (3)에서 push 가능
+- (3)에서 `git push` 시 반드시 remote 명을 명시할 것 (`git push internal <branch>`)
+- 만약 origin/internal 구분이 명확하지 않은 상태라면, push 전에 사용자 확인 필수
+
+---
+
+## 과제 맥락
+
+- **과제명**: Generative AI 기반 Android SystemUI Memory & Performance Regression 원인 분석 자동화
+- **소속**: Generative AI Level 4 교육 과제 (2026.03~08)
+- **인력**: 4명 (SystemUI 성능 분석 담당자 3명 + 본인=리더)
+- **제안서 원본**: 로컬에만 보관 (`.gitignore` 처리됨, GitHub에 없음)
+
+### 본질적 문제
+
+이전 도구로 풀지 못했던 것:
+
+| 시도 | 한계 |
+|---|---|
+| bugreport diff (텍스트 로그 비교) | leak 의심 객체 자체를 못 찾음 |
+| hprof before/after diff | "객체가 늘었다"는 알지만 **누구 소속인지** 모름 |
+| MAT CLI 참조 체인 추적 (이전 Cline SR 시도) | OQL 문법 에러 / 빈 결과 반복 실패 |
+
+따라서 진짜 목표:
+
+> "TextView +194" 가 아니라
+> **"QSPanel.mTileLayout.mTiles 에 이전 타일이 안 빠지고 쌓이는 게 원인"** 까지
+
+= 객체 증가 + GC Root까지의 참조 체인 + 자연어 가설
+
+---
+
+## 우선순위 (재정렬됨)
+
 ```
-1. meminfo 20회 추이 분석 → 누수 여부 판단 (이상치 감지, trimmed 평균)
-2. 누수 감지 시 → hprof-conv로 Android hprof를 표준 Java hprof로 변환
-3. Python hprof 파서 → before vs after 인스턴스 diff → TOP 15 증가 객체 추출
-4. TOP 15에 대해 MAT CLI → 참조 체인(Path to GC Roots) 추적
-5. 결과를 통합 보고서에 삽입
+[1] MAT/hprof PoC 코어 ← 이전에 막혔던 곳
+[2] hprof + LLM 자연어 보고
+[3] bugreport triage + Agent
+[4] RAG / 유사 사례 DB
+[5] 메일 자동화 (사내 메일 시스템 연동, 이건 (3)에서)
 ```
 
-### 보고서 최종 형태
+**현재 상태**: (1)/(2)에서 Phase 1 진입 중. 사내 PC(3)는 외부 PoC 완성 후 받아서 마무리.
+
+---
+
+## 사내 도구 환경 (참고 — `config/local.yaml`에 실제 경로 설정)
+
+| 도구 | 사내 예시 경로 |
+|---|---|
+| adb / hprof-conv | `C:/tools/platform-tools-latest-windows/platform-tools/` |
+| MAT (ParseHeapDump) | 사내 PC 설치본 |
+| Java | OpenJDK Temurin (사내 표준) |
+
+새 PC에서 Cline 시작 시 첫 셋업:
 ```
-인스턴스 증가 TOP 15 테이블 (Python hprof 파서)
-  +
-각 TOP 15 객체의 참조 체인 (MAT CLI)
-  → 개발자가 보고서만 보면 어떤 코드를 수정해야 하는지 바로 알 수 있음
-```
-
-### hprof-conv 변환 (필수)
-- Android hprof → 표준 Java hprof 변환 필수 (MAT가 Android 포맷 직접 못 읽음)
-- 명령: `hprof-conv input.hprof output.hprof`
-- 경로: C:/tools/platform-tools-latest-windows/platform-tools/hprof-conv.exe
-- 모든 hprof 파일에 대해 자동 실행해야 함
-
-### MAT CLI 연동 — 참조 체인 추출
-
-#### 중요: Leak Suspects HTML에는 참조 체인(Path to GC Roots)이 포함되지 않음
-이전에 Leak Suspects 리포트(org.eclipse.mat.api:suspects)에서 참조 체인을 파싱하려고 시도했으나
-이 리포트에는 상세 참조 경로가 포함되지 않음. **OQL(Object Query Language)을 사용해야 함.**
-
-#### OQL 기반 참조 체인 추출 방법
-
-1단계: hprof-conv로 변환된 hprof에 대해 MAT CLI로 인덱스 생성
-```bash
-ParseHeapDump.bat converted.hprof org.eclipse.mat.api:suspects
-```
-이렇게 하면 .index 파일들이 생성되어 이후 OQL 질의가 가능해짐.
-
-2단계: Python hprof 파서로 얻은 TOP 15 증가 클래스에 대해 OQL 실행
-```bash
-# 특정 클래스의 GC Root까지 최단 경로 추출
-ParseHeapDump.bat converted.hprof -command="select * from objects (dominators of aod.m5)"
-
-# 또는 merge_shortest_paths 사용
-ParseHeapDump.bat converted.hprof -command="select * from merge_shortest_paths(outbound(aod.m5), 'GC Roots')"
+1. git clone (사내 GitLab에서)
+2. python -m venv .venv
+3. .venv\Scripts\activate
+4. pip install -r requirements.txt
+5. cp config\local.example.yaml config\local.yaml
+6. local.yaml의 paths를 사내 경로로 채움
+7. python -m systemui_hprof_analyzer env-check
 ```
 
-3단계: OQL 결과를 Python에서 파싱하여 참조 체인 구성
+`env-check` 가 모두 [OK]로 나와야 작업 시작 가능.
+
+---
+
+## 알려진 함정 (MAT CLI) — 이전 Cline SR 실패 경험
+
+다음 패턴은 회피:
+
+1. **힙 메모리 부족**
+   - `ParseHeapDump.bat` 기본 힙 1GB → 125MB hprof 인덱싱 불가
+   - `MemoryAnalyzer.ini`의 `-Xmx` 를 `-Xmx6g` 이상으로
+   - 또는 `MEMORY_FLAG=-Xmx6g` 환경변수
+
+2. **Android hprof 그대로 입력**
+   - MAT는 표준 Java hprof만 읽음
+   - 반드시 `hprof-conv` 먼저
+
+3. **OQL 문법 버전 차이** (이전 실패 주원인)
+   - 단일 OQL에 의존 말 것. 실패 시 대체 문법 순차 시도
+   - 시도한 OQL과 결과(성공/실패)를 모두 로깅
+   - `utils/mat_cli.py` (PoC 단계에서 추가될 모듈)에 라이브러리화
+
+4. **인덱스 캐시 충돌**
+   - 같은 hprof를 다른 옵션으로 재실행 시 `.index` 파일 꼬임
+   - 재실행 전 인덱스 정리
+
+5. **출력 포맷 불안정**
+   - HTML/CSV/txt 중 안정적인 것 검증 필요
+   - 난독화된 클래스명(`aod.m5` 등)은 그대로 보고서에 표시 (mapping 없이 복원 불가)
+
+---
+
+## 분석 파이프라인 (목표)
+
 ```
-기대 결과 형태:
-  GC Root (static)
-    └── com.android.systemui.qs.QSPanel.mTileLayout
-         └── QSTileLayout.mTiles (ArrayList)
-              └── QSTileView
-                   └── mIconView (ImageView)
-                        └── mDrawable (Bitmap)
+1. hprof 캡처
+   - PoC (외부): adb shell am dumpheap (테스트 앱)
+   - 사내(3): regression test 시스템에서 수집된 SystemUI hprof
+2. hprof-conv 변환 (Android → 표준 Java hprof)
+3. Python hprof diff (기존 코드) → 증가 인스턴스 TOP N
+4. MAT CLI OQL → 각 TOP N의 GC Root까지 참조 체인
+5. LLM 자연어 가설 생성
+6. (Phase 2+) bugreport 전처리 → Agent triage → RAG → 보고서 → 메일
 ```
 
-#### OQL 실행 시 주의사항
-- MAT CLI 경로는 Cline이 이미 알고 있음 (사내 PC 설치 경로 사용)
-- OQL 명령이 실패하면 다른 OQL 문법을 시도할 것:
-  - `select * from objects (dominators of ClassName)`
-  - `select classof(referrer).@name, referrer FROM OBJECTS (inbound(ClassName))`
-  - `select * from path2gc ClassName`
-- OQL 결과 포맷은 텍스트 또는 CSV — Python에서 파싱하여 트리 구조로 변환
-- 난독화된 클래스명(aod.m5, aod.r5 등)이 나올 수 있음 — 그대로 보고서에 표시 (mapping.txt 없이는 복원 불가)
+---
 
-#### 필터링 하지 말 것
-framework 클래스(Bitmap, TextView 등)도 참조 체인을 추적하면 SystemUI 코드가 나옴.
-TOP 15 전부에 대해 참조 체인을 추출할 것.
+## 사내 데이터 보안 (중요)
 
-#### 실패 시 fallback
-OQL로 참조 체인 추출이 실패하면:
-- 보고서에 TOP 15 인스턴스 증가 테이블만 표시
-- "참조 체인은 MAT GUI에서 해당 클래스 우클릭 → Path to GC Roots → exclude weak references로 확인하세요" 안내 문구 추가
-- 이것만으로도 "어떤 클래스를 봐야 하는지"는 알 수 있으므로 가치 있음
+- 원문 bugreport, hprof, dumpsys 결과는 **(3) 내부에서만 처리**
+- 외부로 반출 금지 (코드 변경도 GitHub.com에 push 금지)
+- 분석 DB에는 요약/지표/근거 발췌 중심으로 저장
+- 개인정보/민감정보는 저장 대상에서 제외
+- 사내 GitLab으로만 commit & push
 
-## 수정 가능 파일
+---
 
-### 새로 만들어야 할 것
-- systemui_hprof_analyzer/utils/hprof_converter.py → hprof-conv 자동 호출
-- systemui_hprof_analyzer/utils/mat_cli.py → MAT CLI 호출 + 결과 파싱
+## 작업 규칙
 
-### 조건부 수정 (실제 데이터와 맞지 않을 때만)
-- systemui_hprof_analyzer/parser/meminfo_parser.py → 파싱 에러 시 패턴 조정
-- systemui_hprof_analyzer/parser/hprof_parser.py → hprof 포맷 차이 시 조정
-- systemui_hprof_analyzer/extractor/scanner.py → 파일명 패턴이 다를 때 정규식 수정
-- systemui_hprof_analyzer/analyzer/scenario_analyzer.py → 분석 로직 보강
-- systemui_hprof_analyzer/report/generator.py → 보고서에 참조 체인 섹션 추가
-- systemui_hprof_analyzer/cli.py → MAT CLI 연동 옵션 추가
+### 코드
+- 사내 경로 하드코딩 금지 → `config/local.yaml` 경유 (이미 외부에서 셋업됨)
+- 외부에서 작성된 인터페이스를 사내 환경에 맞게 바인딩만 추가
+- LLM provider 추상화 계층의 `internal` provider 구현 (사내 승인 LLM 연동)
+- hprof는 125MB이므로 스트리밍 파싱 유지
+- MAT 호출은 timeout 필수
 
-## 절대 수정 금지
-- systemui_hprof_analyzer/__init__.py
-- systemui_hprof_analyzer/__main__.py
-- .clinerules
+### 문서 동기화 (Claude Code 측 파일과)
+- `CLAUDE.md` — Claude Code용 (외부 PC). 핵심 컨텍스트
+- `.clinerules` — Cline용 (이 파일). 위와 일관 유지
+- `decisions.md` — 구조적 결정 (D1~ 누적, 두 환경에서 모두 읽음)
+- `conversation.md` — 시간순 대화/맥락
+- `docs/setup-toolchain.md` — 도구 설치 가이드
 
-## 작업 순서
-1. 사내 테스트 데이터 zip을 해제하여 폴더 준비
-2. python -m systemui_hprof_analyzer scan ./test_data → 시나리오 목록 확인
-3. python -m systemui_hprof_analyzer analyze ./test_data --scenario idle → 분석 실행
-4. 파싱 에러가 있으면 해당 파서만 최소한으로 수정
-5. hprof-conv 자동 변환 구현 (utils/hprof_converter.py)
-6. MAT CLI 연동 구현 (utils/mat_cli.py)
-7. 보고서에 참조 체인 섹션 추가
-8. 전체 파이프라인 E2E 테스트
+(3)에서 결정 추가 시 — `decisions.md`에 항목 추가, 그리고 가능하면
+`CLAUDE.md`/`.clinerules`도 일관성 유지를 위해 동기화.
 
-## 코딩 규칙
-- 기존 코드 스타일 유지 (dataclass, type hints)
-- hprof는 125MB이므로 메모리 효율적 파싱 유지 (스트리밍 방식)
-- MAT CLI 호출 시 timeout 설정 (hprof 크기에 따라 1-5분 소요)
-- hprof-conv 변환된 파일은 임시 디렉토리에 생성하고 분석 후 정리
+### 세션 종료 전 체크리스트 (3에서)
+- [ ] 새로 발견한 사내 환경 함정 → `.clinerules` 갱신
+- [ ] 새로 내린 결정 → `decisions.md` 추가
+- [ ] 변경 코드 → 사내 git에 commit & push (origin이 아닌 internal remote)
+- [ ] `config/local.yaml` 항목 추가 시 → `local.example.yaml` 동기화 (외부 PC에서도 필요)
+
+---
+
+## 현재 코드 구조
+
+```
+systemui_hprof_analyzer/
+├── __main__.py
+├── cli.py                  ← scan / compare / analyze / hprof-diff / parse-meminfo / env-check
+├── config/
+│   └── loader.py           ← YAML config 로더
+├── extractor/
+│   └── scanner.py
+├── parser/
+│   ├── meminfo_parser.py
+│   └── hprof_parser.py
+├── analyzer/
+│   ├── scenario_analyzer.py
+│   └── version_comparator.py
+├── report/
+│   └── generator.py
+└── llm/                    ← 빈 폴더 (Phase 2 진입점)
+```
+
+## PoC 단계에서 추가될 모듈
+
+```
+systemui_hprof_analyzer/
+├── utils/
+│   ├── hprof_converter.py   ← hprof-conv 자동 호출
+│   └── mat_cli.py           ← MAT CLI 래퍼 + OQL 라이브러리 + 실패 패턴 로깅
+└── (Phase 2+)
+    ├── bugreport/           ← 비정형 로그 전처리
+    ├── agent/               ← LLM 분석 단계
+    └── rag/                 ← 유사 사례 검색
+```
+
+---
+
+## (3)에서 자주 할 작업 패턴
+
+### 외부에서 받은 PoC 코드를 사내 데이터로 검증
+1. 외부 GitHub.com에서 pull (단방향)
+2. 사내 regression test 시스템의 SystemUI hprof로 동일 파이프라인 실행
+3. 결과 비교: 외부 테스트 앱 hprof vs 사내 SystemUI hprof에서
+   각각 같은 도구가 잘 동작하는가
+4. 사내 특이 케이스 발견 시 — `.clinerules`/`decisions.md` 갱신, 사내 git에 push
+
+### bugreport 분석 (Phase 3에서)
+- 사내 dumpsys 포맷의 변형 가능성 — 사내 정규식 보강 필요할 수 있음
+- 외부 PoC의 추상 인터페이스는 유지하고, 사내 케이스만 추가

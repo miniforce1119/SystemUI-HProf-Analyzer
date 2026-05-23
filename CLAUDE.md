@@ -45,15 +45,32 @@ Android SystemUI 성능 Regression의 **"객체 소속·생성 경로"** 까지 
 2. **사내** PC에서 git pull → `local.yaml` 한 줄 바꾸고 그대로 동작
 3. 사내에서 안 풀리던 MAT CLI 문제를 밖에서 먼저 안정화
 
-### 집 PC ↔ 회사 PC 멀티 환경
-- 두 환경을 오가며 작업하므로, **자동 메모리에만 의존하지 않음**
-- 영속화 계층 (git 추적):
-  - `CLAUDE.md` — 상시 컨텍스트 (이 파일)
-  - `decisions.md` — 구조적 결정 기록
-  - `conversation.md` — 대화/맥락 흐름
-  - `config/local.example.yaml` — 환경 경로 템플릿
-- PC별 (gitignore):
-  - `config/local.yaml` — 각 PC의 실제 경로
+### 3-PC 토폴로지 (집/강의장/사내)
+
+이 프로젝트는 **세 환경**을 오갑니다:
+
+| 환경 | 도구 | 외부 인터넷 | GitHub.com push | 사내 데이터 |
+|---|---|---|---|---|
+| (1) 집 PC | Claude Code | ✅ | ✅ | ❌ |
+| (2) 회사 강의장 PC (사외망) | Claude Code | ✅ | ✅ | ❌ |
+| (3) 사내망 PC | **Cline** (Claude Code 미사용) | ❌ | ❌ (pull은 ✅) | ✅ |
+
+**데이터 흐름**: (1) ⇄ (2) ⇄ GitHub.com → (3). (3)은 편도 (pull only).
+
+→ Cline 환경은 별도 컨텍스트 파일(`.clinerules`)을 사용. 이 `CLAUDE.md`와
+일관되어야 하므로, 한쪽 갱신 시 다른 쪽도 동기화할 것.
+
+영속화 계층 (git 추적, 모든 환경에서 공유):
+- `CLAUDE.md` — Claude Code(외부 PC)용 상시 컨텍스트 (이 파일)
+- `.clinerules` — Cline(사내 PC)용 상시 컨텍스트
+- `decisions.md` — 구조적 결정 기록
+- `conversation.md` — 대화/맥락 흐름
+- `docs/setup-toolchain.md` — 도구 설치 가이드
+- `config/local.example.yaml` — 환경 경로 템플릿
+
+PC별 (gitignore):
+- `config/local.yaml` — 각 PC의 실제 경로
+- `.venv/`
 
 ### 환경 의존성 격리 원칙
 - **사내 경로 하드코딩 절대 금지** — 모두 `config/local.yaml` 경유
